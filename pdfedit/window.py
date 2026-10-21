@@ -19,6 +19,8 @@ from .widgets import PageList, Preview
 from .workers import Job
 from .icons import ASSETS, icon
 from .dialogs import Messages, ExportProgressDialog, choose_export
+from .text_panel import TextPanel
+from .text_editing import recognize_page, block_bounds, source_size
 
 
 def label(text, name=""):
@@ -59,6 +61,7 @@ class MainWindow(QMainWindow):
         self.jobs = set()
         self.importing = False
         self.exporting = False
+        self.recognizing = False
         self.pending_paths = []
         self.preview_serial = 0
         self.preview_busy = False
@@ -66,7 +69,7 @@ class MainWindow(QMainWindow):
         self.dirty = False
         self.output_path = None
         self._syncing = False
-        self.setWindowTitle("合页 · 图片与 PDF 合并")
+        self.setWindowTitle("合页 · PDF 合并与文字编辑")
         self.resize(1280, 820)
         self.setMinimumSize(1060, 720)
         self.timer = QTimer(self)
@@ -98,7 +101,7 @@ class MainWindow(QMainWindow):
         head.addWidget(mark)
         head.addWidget(label("合页", "brand"))
         head.addSpacing(8)
-        tagline = label("图片与 PDF 合并", "headerTag")
+        tagline = label("PDF 合并与文字编辑", "headerTag")
         tagline.setWordWrap(False)
         head.addWidget(tagline)
         head.addStretch()
@@ -173,6 +176,8 @@ class MainWindow(QMainWindow):
         self.preview_title = label("页面预览", "panelTitle")
         ph.addWidget(self.preview_title)
         ph.addStretch()
+        self.edit_text_button = button("编辑文字", self.open_text_editor, "subtle")
+        ph.addWidget(self.edit_text_button)
         self.previous_page = button("", lambda: self.navigate_page(-1), "navButton", "left")
         self.next_page = button("", lambda: self.navigate_page(1), "navButton", "right")
         for control, title in [(self.previous_page, "上一页"), (self.next_page, "下一页")]:
@@ -191,10 +196,10 @@ class MainWindow(QMainWindow):
         self.preview_info.setContentsMargins(20, 0, 20, 0)
         self.preview_info.setMinimumHeight(30)
         center_layout.addWidget(self.preview_info)
-        tip = label("拖动纸张内的内容调整位置 · 右侧修改后实时预览", "helper")
-        tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tip.setContentsMargins(12, 0, 12, 16)
-        center_layout.addWidget(tip)
+        self.preview_tip = label("拖动纸张内的内容调整位置 · 右侧修改后实时预览", "helper")
+        self.preview_tip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_tip.setContentsMargins(12, 0, 12, 16)
+        center_layout.addWidget(self.preview_tip)
         splitter.addWidget(center)
 
         self.right = QFrame()
@@ -210,6 +215,20 @@ class MainWindow(QMainWindow):
         self.tabs.setIconSize(QSize(16, 16))
         self.tabs.addTab(self.layout_tab(), "页面排版")
         self.tabs.addTab(self.watermark_tab(), "添加水印")
+        self.text_panel = TextPanel(self.root)
+        self.tabs.addTab(self.text_panel, "文字编辑")
+        self.tabs.tabBar().setStyleSheet("QTabBar::tab { padding-left: 8px; padding-right: 8px; }")
+        self.text_panel.changed.connect(self.mark_changed)
+        self.text_panel.selected.connect(self.sync_text_overlay)
+        self.text_panel.recognizeRequested.connect(self.recognize_text)
+        self.text_panel.flushRequested.connect(self.preview.finish_edit)
+        self.text_panel.editRequested.connect(self.edit_text_inline)
+        self.preview.textSelected.connect(self.text_panel.select)
+        self.preview.textMoved.connect(self.drag_text)
+        self.preview.textEditRequested.connect(self.edit_text_inline)
+        self.preview.textCommitted.connect(self.text_panel.apply_text)
+        self.preview.inputLimitReached.connect(lambda: self.status.setText("单个文字块最多 12000 个字符，本次输入未添加。可拆分为多个文字块。"))
+        self.tabs.currentChanged.connect(self.sync_text_overlay)
         rl.addWidget(self.tabs)
         splitter.addWidget(self.right)
         splitter.setSizes([260, 716, 304])
@@ -252,6 +271,7 @@ class MainWindow(QMainWindow):
         self.remove_button.setEnabled(bool(selected))
         self.previous_page.setEnabled(row > 0)
         self.next_page.setEnabled(0 <= row < count - 1)
+        self.edit_text_button.setEnabled(row >= 0 and not self.importing and not self.recognizing)
 
     def form(self):
         scroll = QScrollArea()
@@ -490,12 +510,20 @@ class MainWindow(QMainWindow):
         self.update_selection_controls()
         self.preview_serial += 1
         self.page_count.setText(f"{self.page_list.count()} 页")
-        self.export_button.setEnabled(self.page_list.count() > 0 and not self.importing and not self.exporting)
+        self.export_button.setEnabled(self.page_list.count() > 0 and not self.importing and not self.exporting and not self.recognizing)
+        if self.text_panel.page is not self.current_page():
+            self.preview.finish_edit()
+            self.text_panel.set_page(self.current_page())
+        self.preview.set_page(self.current_page().uid if self.current_page() else "")
+        self.sync_text_overlay()
         self.timer.start()
 
     def select_page(self, *args):
+        self.preview.finish_edit()
         self.update_selection_controls()
         page = self.current_page()
+        self.text_panel.set_page(page)
+        self.preview.set_page(page.uid if page else "")
         if page:
             self._syncing = True
             self.zoom.setValue(round(page.zoom * 100))
@@ -503,7 +531,117 @@ class MainWindow(QMainWindow):
             self.offset_y.setValue(round(page.offset_y * 100))
             self._syncing = False
         self.preview_serial += 1
+        self.sync_text_overlay()
         self.timer.start()
+
+    def open_text_editor(self):
+        self.tabs.setCurrentWidget(self.text_panel)
+        page = self.current_page()
+        if page and not page.text_recognized:
+            self.recognize_text("current")
+
+    def sync_text_overlay(self, *args):
+        page = self.current_page()
+        boxes = []
+        enabled = self.tabs.currentWidget() is self.text_panel
+        if self.preview.inline_block_id and (not enabled or not page or
+            self.preview.inline_page_uid != page.uid or self.preview.inline_block_id != self.text_panel.selected_id):
+            self.preview.finish_edit()
+        self.preview_tip.setText("点击文字直接输入 · Enter 完成 · Shift+Enter 换行 · Esc 取消" if enabled else
+                                 "拖动纸张内的内容调整位置 · 右侧修改后实时预览")
+        if page and enabled:
+            pw, ph, (rx, ry, rw, rh) = geometry(page, self.layout_options)
+            sw, sh = source_size(page)
+            def point(x, y):
+                x, y = {0:(x,y), 90:(1-y,x), 180:(1-x,1-y), 270:(y,1-x)}[page.rotation]
+                return (rx+x*rw)/pw, (ry+y*rh)/ph
+            for b in page.text_blocks:
+                if b.get('deleted'):
+                    continue
+                try:
+                    x,y,w,h = block_bounds(b, sw, sh)
+                except Exception:
+                    x,y,w,h = (b[k] for k in ('x','y','width','height'))
+                points = [point(x,y), point(x+w,y), point(x+w,y+h), point(x,y+h)]
+                left,top = min(v[0] for v in points),min(v[1] for v in points)
+                boxes.append((b['id'], (left,top,max(v[0] for v in points)-left,max(v[1] for v in points)-top)))
+        self.preview.set_text_boxes(boxes, self.text_panel.selected_id, enabled)
+
+    def edit_text_inline(self, block_id, select_all=False):
+        if self.importing or self.exporting or self.recognizing:
+            return
+        self.preview.finish_edit()
+        self.text_panel.select(block_id)
+        page, block = self.current_page(), self.text_panel.current_block()
+        if not page or not block or block.get('deleted'):
+            return
+        self.sync_text_overlay()
+        pw, _, (_, _, rw, _) = geometry(page, self.layout_options)
+        sw, sh = source_size(page)
+        source_width = sh if page.rotation in (90, 270) else sw
+        self.preview.begin_edit(page.uid, block, block['font_size'] * rw/source_width/pw, select_all)
+
+    def drag_text(self, dx, dy):
+        page = self.current_page()
+        if page and not (self.exporting or self.recognizing):
+            pw,ph,(_,_,rw,rh) = geometry(page, self.layout_options)
+            dx,dy = dx*pw/rw,dy*ph/rh
+            dx,dy = {0:(dx,dy),90:(dy,-dx),180:(-dx,-dy),270:(-dy,dx)}[page.rotation]
+            self.text_panel.move_text(dx,dy)
+
+    def recognize_text(self, mode="current"):
+        if self.importing or self.exporting or self.recognizing or not self.current_page():
+            return
+        self.preview.finish_edit()
+        targets = self.pages() if mode == "all" else [self.current_page()]
+        targets = copy.deepcopy(targets)
+        self.recognizing = True
+        self.splitter.setEnabled(False)
+        self.export_button.setEnabled(False)
+        self.tools_button.setEnabled(False)
+        cancel = threading.Event()
+        progress = ExportProgressDialog(self, len(targets), recognizing=True)
+        progress.canceled.connect(cancel.set)
+        progress.show()
+        self.recognition_progress = progress
+        def task(signals):
+            completed, errors = {}, []
+            for i, page in enumerate(targets, 1):
+                if cancel.is_set():
+                    break
+                try:
+                    result = recognize_page(page, supplement=mode == "supplement", cancelled=cancel.is_set)
+                    if result is not None:
+                        completed[page.uid] = result
+                except Exception as exc:
+                    errors.append(page.label + "：" + str(exc))
+                signals.progress.emit(i, len(targets))
+            return completed, errors
+        job = Job(task)
+        job.signals.progress.connect(lambda current,total: progress.setValue(current))
+        def finish(result=None, error=None):
+            progress.finish()
+            progress.deleteLater()
+            self.recognition_progress = None
+            self.recognizing = False
+            self.splitter.setEnabled(True)
+            self.tools_button.setEnabled(True)
+            completed, errors = result if result else ({}, [error] if error else [])
+            for page in self.pages():
+                if page.uid in completed:
+                    page.text_blocks, page.text_source_signature = completed[page.uid]
+                    page.text_recognized = True
+                    self.text_panel.history.pop(page.uid, None)
+                    self.text_panel.redo_history.pop(page.uid, None)
+            self.text_panel.set_page(self.current_page())
+            self.mark_changed()
+            count = sum(len(value[0]) for value in completed.values())
+            self.status.setText(f"{'已停止识别' if cancel.is_set() else '识别完成'} · {len(completed)} 页 · {count} 个文字块 · 点击页面文字直接修改")
+            if errors:
+                Messages.warning(self, "部分页面未识别", f"已完成 {len(completed)} 页，{len(errors)} 页未完成。", details="\n".join(errors))
+            if self.pending_paths:
+                self.import_timer.start()
+        self.run_job(job, lambda result: finish(result=result), lambda error: finish(error=error))
 
     def global_change(self, *args):
         if self._syncing:
@@ -566,15 +704,16 @@ class MainWindow(QMainWindow):
 
     def drag_image(self, dx, dy):
         page = self.current_page()
-        if page and not self.exporting:
+        if page and not self.exporting and not self.recognizing:
             page.offset_x = max(-1.0, min(1.0, page.offset_x + dx))
             page.offset_y = max(-1.0, min(1.0, page.offset_y + dy))
             self.select_page()
             self.mark_changed()
 
     def rotate(self, angle):
-        if self.exporting:
+        if self.exporting or self.recognizing:
             return
+        self.preview.finish_edit()
         for item in self.page_list.selectedItems():
             page = item.data(Qt.ItemDataRole.UserRole)
             page.rotation = (page.rotation + angle) % 360
@@ -629,7 +768,7 @@ class MainWindow(QMainWindow):
         self.run_job(job, lambda data: finish(data=data), lambda error: finish(error=error))
 
     def choose_images(self):
-        if self.exporting:
+        if self.exporting or self.recognizing:
             return
         paths, _ = QFileDialog.getOpenFileNames(self, "添加文件", str(self.root), FILE_FILTER)
         self.add_paths(paths)
@@ -646,7 +785,7 @@ class MainWindow(QMainWindow):
         self.import_timer.start()
 
     def start_import(self):
-        if self.importing or self.exporting:
+        if self.importing or self.exporting or self.recognizing:
             return
         if not self.pending_paths:
             return
@@ -714,14 +853,15 @@ class MainWindow(QMainWindow):
         self.status.setText(f"正在读取文件 {current} / {total}")
 
     def remove_pages(self):
-        if self.exporting:
+        if self.exporting or self.recognizing:
             return
+        self.preview.finish_edit()
         for item in self.page_list.selectedItems():
             self.page_list.takeItem(self.page_list.row(item))
         self.mark_changed()
 
     def move_pages(self, direction):
-        if self.exporting:
+        if self.exporting or self.recognizing:
             return
         selected = self.page_list.selectedItems()
         rows = sorted((self.page_list.row(item) for item in selected), reverse=direction > 0)
@@ -747,6 +887,7 @@ class MainWindow(QMainWindow):
 
     def list_menu(self, position):
         menu = QMenu(self)
+        menu.addAction("识别并编辑文字", self.open_text_editor)
         menu.addAction("合并为 PDF…", self.export)
         menu.addSeparator()
         menu.addAction("上移", lambda: self.move_pages(-1))
@@ -778,16 +919,20 @@ class MainWindow(QMainWindow):
 
     def help(self):
         Messages.information(self, "合页 · 使用说明",
-            "1. 添加或拖入图片 / PDF / 文件夹。\n2. 拖动左侧卡片调整页序，右侧设置排版和水印。\n3. 点击「导出 PDF」，选择保存位置。\n\n"
+            "1. 添加或拖入图片 / PDF / 文件夹。\n2. 拖动左侧卡片调整页序，右侧设置排版和水印。\n3. 在「文字编辑」识别当前页或全部页，再点击文字框修改。\n4. 点击「导出 PDF」，选择保存位置。\n\n"
             "支持 PDF / JPG / PNG / BMP / WebP / TIFF / GIF / HEIC / HEIF / AVIF / SVG / ICO / JPEG 2000 等。\n"
             "PDF / TIFF 多页自动展开；动态图片仅取首帧；PSD 仅读取兼容合成预览，不编辑图层；SVG 栅格化。\n"
-            "PDF 保留文字与矢量，批注与表单按外观转为固定内容，不保留签名效力、交互表单、附件与书签。需要打开密码的 PDF 请先解密另存。\n不支持相机 RAW、AI / EPS 或损坏的文件。单张图片上限 8000 万像素。\n\n"
+            "PDF 合并保留文字与矢量，批注与表单按外观转为固定内容，不保留签名效力、交互表单、附件与书签。需要打开密码的 PDF 请先解密另存。\n"
+            "文字编辑：原生文字直接提取，扫描件使用本地中文 / 英文 OCR，识别后请校对。点击页面文字即可在原位置输入，Enter 或点击空白处完成，Shift+Enter 换行，Esc 取消本次输入。拖动上方移动柄调整位置，右侧调整字体、字号、颜色、粗体和斜体，可撤销 / 重做。混合页面可补充识别图片文字。\n"
+            "扫描文字通过覆盖旧字区域替换，可调整覆盖底色；复杂背景可能留下痕迹。嵌套 PDF 文字修改会固定该页外观并补回可搜索文字。此功能不等同安全涂黑，不支持跨页自动重排。\n"
+            "不支持相机 RAW、AI / EPS 或损坏的文件。单张图片上限 8000 万像素。\n\n"
             "右键入口：更多 → 安装右键菜单。Windows 11 通常位于「显示更多选项」，传统入口最多选择 100 个文件。更多文件请拖入窗口或添加文件夹。\n\n"
             "编辑方案保存源文件路径和设置，不打包图片与 PDF。移动或备份时需同时保留源文件。所有处理均在本机完成。")
 
     def save_project(self):
-        if self.importing or self.exporting:
+        if self.importing or self.exporting or self.recognizing:
             return
+        self.preview.finish_edit()
         path, _ = QFileDialog.getSaveFileName(self, "保存编辑方案", str(self.root / "合页方案.ipdf.json"), "合页方案 (*.ipdf.json)")
         if path:
             try:
@@ -798,27 +943,14 @@ class MainWindow(QMainWindow):
                 Messages.warning(self, "保存失败", str(exc))
 
     def load_project(self):
-        if self.importing or self.exporting or not self.confirm_discard():
+        if self.importing or self.exporting or self.recognizing or not self.confirm_discard():
             return
         path, _ = QFileDialog.getOpenFileName(self, "打开编辑方案", str(self.root), "合页方案 (*.ipdf.json)")
         if not path:
             return
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
-            if data.get("version") != 1:
-                raise ValueError("不支持的方案版本。")
-            pages = [Page(**x) for x in data["pages"]]
-            layout, watermark = Layout(**data["layout"]), Watermark(**data["watermark"])
-            if layout.paper not in {*PAPERS, "original"} or layout.orientation not in {"auto", "portrait", "landscape"} or layout.quality not in {"original", "high", "compact"}:
-                raise ValueError("方案包含无效的页面设置。")
-            if watermark.kind not in {"none", "text", "image"} or not 0 < watermark.opacity <= 1 or not 8 <= watermark.font_size <= 160 or not .05 <= watermark.scale <= .9:
-                raise ValueError("方案包含无效的水印设置。")
-            if type(watermark.density) is not int or not 1 <= watermark.density <= 10:
-                raise ValueError("方案中的平铺密度应为 1 至 10 的整数。")
-            if any(not Path(p.path).is_file() for p in pages):
-                raise ValueError("方案中的部分源文件已移动或不存在，请先恢复源文件路径。")
-            if any(not .05 <= p.zoom <= 2.5 or abs(p.offset_x) > 1 or abs(p.offset_y) > 1 or p.rotation not in {0,90,180,270} for p in pages):
-                raise ValueError("方案包含无效的内容位置。")
+            from .project_io import read_project
+            pages, layout, watermark = read_project(path)
             from .imaging import load_image
             thumbs = []
             for page in pages:
@@ -859,8 +991,9 @@ class MainWindow(QMainWindow):
         self._syncing = False
 
     def export(self):
-        if self.exporting or self.importing or not self.page_list.count():
+        if self.exporting or self.importing or self.recognizing or not self.page_list.count():
             return
+        self.preview.finish_edit()
         try:
             if self.watermark.kind != "none":
                 page_selection(self.watermark.pages, self.page_list.count())
@@ -915,15 +1048,16 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(self.output_path))
 
     def confirm_discard(self, closing=False):
+        self.preview.finish_edit()
         if self.dirty and self.page_list.count():
             return Messages.confirm(self, "退出合页？" if closing else "打开其他编辑方案？",
-                "当前编辑尚未保存。离开后，本次页序、排版和水印设置将丢失。\n可继续编辑，并通过「更多 → 保存编辑方案」保留。",
+                "当前编辑尚未保存。离开后，本次文字修改、页序、排版和水印设置将丢失。\n可继续编辑，并通过「更多 → 保存编辑方案」保留。",
                 confirm_text="退出合页" if closing else "放弃并打开", cancel_text="继续编辑")
         return True
 
     def closeEvent(self, event):
-        if self.importing or self.exporting:
-            Messages.information(self, "正在处理", "请等待文件导入完成，或取消 PDF 导出后再关闭。")
+        if self.importing or self.exporting or self.recognizing:
+            Messages.information(self, "正在处理", "请等待文件导入完成，或取消文字识别 / PDF 导出后再关闭。")
             event.ignore()
             return
         if not self.confirm_discard(closing=True):

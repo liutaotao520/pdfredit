@@ -18,6 +18,9 @@ class Page:
     offset_y: float = 0.0
     note: str = ""
     uid: str = field(default_factory=lambda: uuid.uuid4().hex)
+    text_blocks: list[dict] = field(default_factory=list)
+    text_recognized: bool = False
+    text_source_signature: str = ""
 
     @property
     def is_pdf(self) -> bool:
@@ -79,5 +82,5 @@ def page_selection(text: str, count: int) -> set[int]:
 
 
 def project_data(pages, layout, watermark):
-    return {"version": 1, "pages": [asdict(x) for x in pages],
+    return {"version": 2, "pages": [asdict(x) for x in pages],
             "layout": asdict(layout), "watermark": asdict(watermark)}

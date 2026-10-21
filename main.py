@@ -70,8 +70,12 @@ def main():
         parser.add_argument("--watermark-scale", type=int, default=28, help="图片水印占页面宽度的百分比，5–90")
         parser.add_argument("--watermark-tiled", action="store_true", help="平铺水印，覆盖整页")
         parser.add_argument("--watermark-density", type=int, choices=range(1, 11), default=3, help="平铺密度 1–10，默认 3")
-        parser.add_argument("images", nargs="+")
+        parser.add_argument("--project", help="读取 .ipdf.json 编辑方案，保留文字修改与排版")
+        parser.add_argument("--ocr", action="store_true", help="在本机识别输入文件，加入可搜索文字层")
+        parser.add_argument("images", nargs="*")
         args = parser.parse_args()
+        if bool(args.project) == bool(args.images):
+            parser.error("请选择输入文件或 --project 编辑方案，两者不能同时使用。")
         if not 5 <= args.watermark_scale <= 90:
             parser.error("图片水印缩放必须在 5% 至 90% 之间。")
         from pdfedit.imaging import inspect_image
@@ -83,11 +87,20 @@ def main():
         if args.watermark_image:
             watermark = Watermark(kind="image", image_path=args.watermark_image, scale=args.watermark_scale / 100)
         watermark.tiled, watermark.density = args.watermark_tiled, args.watermark_density
-        result = export_pdf(pages, Layout(paper=args.paper), watermark, args.export)
+        layout = Layout(paper=args.paper)
+        if args.project:
+            from pdfedit.project_io import read_project
+            pages, layout, watermark = read_project(args.project)
+        if args.ocr:
+            from pdfedit.text_editing import recognize_page
+            for page in pages:
+                page.text_blocks, page.text_source_signature = recognize_page(page)
+                page.text_recognized = True
+        result = export_pdf(pages, layout, watermark, args.export)
         result["executable"] = sys.executable
         result["packaged"] = bool(getattr(sys, "frozen", False))
         result["application_modules"] = sorted({str(module.__file__) for name, module in sys.modules.items()
-            if name.startswith(("PySide6", "PIL", "pillow_heif", "reportlab", "pdfedit", "pypdf", "pypdfium2")) and getattr(module, "__file__", None)})
+            if name.startswith(("PySide6", "PIL", "pillow_heif", "reportlab", "pdfedit", "pypdf", "pypdfium2", "rapidocr", "onnxruntime", "cv2", "numpy", "fontTools")) and getattr(module, "__file__", None)})
         (root / "runtime" / "last-export.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         return 0
     paths = [str(Path(value).absolute()) for value in sys.argv[1:] if not value.startswith("--")]

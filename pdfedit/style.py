@@ -112,6 +112,9 @@ QPushButton#resetButton:focus { border-color: @text@; }
 QPushButton#resetButton:disabled { color: @disabled@; background: transparent; border-color: transparent; }
 QListWidget#pageList { background: transparent; border: none; outline: none; }
 QListWidget::item { border: none; }
+QListWidget#textBlocks { background: @sidebar@; border: 1px solid @border@; border-radius: 5px; outline: none; }
+QListWidget#textBlocks::item { padding: 7px 5px; color: @text@; }
+QListWidget#textBlocks::item:selected { background: @hover@; color: @text@; }
 QSplitter::handle { background: @border@; }
 QSplitter::handle:hover { background: @disabled@; }
 QScrollArea { border: none; background: @white@; }

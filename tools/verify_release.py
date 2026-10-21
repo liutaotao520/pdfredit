@@ -108,10 +108,54 @@ def main():
         density_outputs.append((tiled_output, 0, f'release-density-{level}.png'))
         tiled_reader.close()
     assert density_counts[1] > density_counts[0] * 6
+    # Exercise OCR and font editing in the actual EXE without Python on PATH.
+    from PIL import ImageDraw, ImageFont
+    from pdfedit.imaging import inspect_image
+    from pdfedit.models import Layout, Watermark, project_data
+    from pdfedit.text_editing import recognize_page
+    scan = temp / '扫描文字.png'
+    scan_image = Image.new('RGB', (1200, 600), 'white')
+    ImageDraw.Draw(scan_image).text((60, 90), '合页 PDF 文字编辑 2026',
+        font=ImageFont.truetype('C:/Windows/Fonts/msyh.ttc', 56), fill='black')
+    scan_image.save(scan)
+    searchable = temp / '本地OCR.pdf'
+    result = subprocess.run([str(exe), '--export', str(searchable), '--ocr', str(scan), str(source)],
+                            env=env, cwd=temp, timeout=120)
+    assert result.returncode == 0
+    with PdfReader(searchable) as reader:
+        assert len(reader.pages)==3
+        assert '2026' in reader.pages[0].extract_text() and '合页' in reader.pages[0].extract_text()
+        assert 'Native PDF page 1' in reader.pages[1].extract_text()
+    ocr_receipt=json.loads((exe.parent/'runtime/last-export.json').read_text(encoding='utf-8'))
+    assert any('onnxruntime' in p for p in ocr_receipt['application_modules'])
+    assert any('rapidocr' in p for p in ocr_receipt['application_modules'])
+    reimported_scan = temp / '再次识别扫描件.pdf'
+    result = subprocess.run([str(exe), '--export', str(reimported_scan), '--ocr', str(searchable)],
+                            env=env, cwd=temp, timeout=120)
+    assert result.returncode == 0
+    with PdfReader(reimported_scan) as reader:
+        assert reader.pages[0].extract_text().count('2026')==1
+    page = inspect_image(str(source))[0][0]
+    page.text_blocks, page.text_source_signature = recognize_page(page)
+    page.text_recognized = True
+    block = next(b for b in page.text_blocks if 'Native PDF page 1' in b['text'])
+    block.update(text='合页 · 修改后的文字', font_family='Microsoft YaHei', font_size=24, bold=True, color='#222222', changed=True)
+    project = temp / '文字修改.ipdf.json'
+    project.write_text(json.dumps(project_data([page], Layout(paper='original'), Watermark()), ensure_ascii=False), encoding='utf-8')
+    text_output = temp / '修改后.pdf'
+    result = subprocess.run([str(exe), '--export', str(text_output), '--project', str(project)], env=env, cwd=temp, timeout=60)
+    assert result.returncode == 0
+    with PdfReader(text_output) as reader:
+        text = reader.pages[0].extract_text()
+        assert '修改后的文字' in text and 'Native PDF page 1' not in text
+    edited_receipt = json.loads((exe.parent/'runtime/last-export.json').read_text(encoding='utf-8'))
+    receipt['application_modules'] = sorted(set(receipt['application_modules'] + edited_receipt['application_modules'] + ocr_receipt['application_modules']))
+    assert all(Path(p).is_relative_to(exe.parent) if Path(p).is_absolute() else p.startswith('shibokensupport/') for p in receipt['application_modules'])
     import pypdfium2 as pdfium
     for source,index,name in [(output,0,'release-text-watermark.png'),(output2,0,'release-image-watermark.png'),
                                (mixed,0,'release-mixed-pdf.png'),(mixed,3,'release-pdf-form.png'),
-                               (a3_output,0,'release-a3-5percent.png'), *density_outputs]:
+                               (a3_output,0,'release-a3-5percent.png'), (searchable,0,'release-ocr.png'),
+                               (text_output,0,'release-text-edited.png'), *density_outputs]:
         document=pdfium.PdfDocument(str(source))
         page=document[index]
         bitmap=page.render(scale=1.2)
@@ -148,6 +192,8 @@ def main():
         'pdf_input':{'mixed_pages':4,'multipage':'passed','native_text':'passed','rotated_crop':'passed','form_appearance':'passed'},
         'a3_and_watermark':{'paper_mm':[297,420],'watermark_scale_percent':5,'rendered_size_check':'passed'},
         'watermark_density':{'status':'passed','levels':[3,10],'exported_copies':density_counts},
+        'text_editing':{'native_replacement':'passed','font_embedding_chinese':'passed','offline_ocr_models':'bundled',
+                        'scanned_chinese_english':'passed','saved_project_export':'passed'},
         'runtime_modules':receipt['application_modules'],'binary_sources':binaries,'codex_shutdown_test':'not performed; 独立运行尚未验证',
         'portable_exe_test':'passed with Windows-only PATH and no Python/Codex environment variables',
         'build_audit_source':args.prior_build_report or 'current task PyInstaller Analysis-00.toc'}

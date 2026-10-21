@@ -2,7 +2,7 @@
   #define ProjectRoot ".."
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.3.4"
+  #define AppVersion "1.4.2"
 #endif
 #ifndef ReleaseName
   #define ReleaseName "PDFedit-" + AppVersion
@@ -36,7 +36,7 @@ SolidCompression=yes
 WizardStyle=modern
 WizardSizePercent=110,100
 VersionInfoVersion={#AppVersion}.0
-VersionInfoDescription=合页 图片与 PDF 合并 安装程序
+VersionInfoDescription=合页 PDF 合并与文字编辑 安装程序
 VersionInfoProductName=合页
 VersionInfoProductVersion={#AppVersion}
 DirExistsWarning=yes
@@ -45,7 +45,7 @@ DirExistsWarning=yes
 Name: "chinesesimp"; MessagesFile: "{#ProjectRoot}\packaging\ChineseSimplified.isl"
 
 [Messages]
-WelcomeLabel2=将安装合页 {#AppVersion}：把图片和 PDF 按页排序合并为 PDF，并添加文字或图片水印。%n%n软件自带运行环境，无需 Python，无需联网。请选择有写入权限的本地文件夹。
+WelcomeLabel2=将安装合页 {#AppVersion}：合并图片与 PDF、识别和编辑文字、修改字体，并添加文字或图片水印。%n%n软件自带运行环境与离线识别模型，无需 Python，无需联网。请选择有写入权限的本地文件夹。
 SelectDirLabel3=软件及运行数据将保存在所选文件夹中。
 FinishedLabel=合页已安装完成。%n%n打开安装目录中的“合页.exe”即可使用。安装目录内的“使用说明.txt”包含操作和备份说明。
 
@@ -60,6 +60,7 @@ Source: "{#SourceRelease}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignorev
 Source: "{#SourceRelease}\使用说明.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRelease}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceRelease}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceRelease}\docs\USER_GUIDE.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "{#ProjectRoot}\packaging\使用说明.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]

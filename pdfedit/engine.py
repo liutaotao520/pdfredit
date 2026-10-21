@@ -76,7 +76,8 @@ def render_preview(page: Page, layout: Layout, watermark: Watermark, number: int
     pw, ph, rect = geometry(page, layout)
     scale = max_side / max(pw, ph)
     canvas = Image.new("RGBA", (max(1, round(pw * scale)), max(1, round(ph * scale))), "white")
-    image = load_image(page.path, page.frame, max_side=1800)
+    from .text_editing import has_text_output, render_edited
+    image = render_edited(page, 1800) if has_text_output(page) else load_image(page.path, page.frame, max_side=1800)
     if page.rotation:
         image = image.rotate(-page.rotation, expand=True)
     x, y, w, h = rect
@@ -91,6 +92,7 @@ def render_preview(page: Page, layout: Layout, watermark: Watermark, number: int
 
 def export_pdf(pages: list[Page], layout: Layout, watermark: Watermark, output: str,
                cancelled=lambda: False, progress=lambda current, total: None, overwrite=False):
+    from .text_editing import has_text_output, edited_source_pdf
     if not pages:
         raise ValueError("请先添加图片或 PDF。")
     target = Path(output).expanduser().resolve()
@@ -117,7 +119,7 @@ def export_pdf(pages: list[Page], layout: Layout, watermark: Watermark, output: 
             raise ExportCancelled("已取消导出，原文件未改动。")
         pw, ph, (x, y, w, h) = geometry(page, layout)
         pdf.setPageSize((pw, ph))
-        if not page.is_pdf:
+        if not page.is_pdf and not has_text_output(page):
             image = load_image(page.path, page.frame)
             if page.rotation:
                 image = image.rotate(-page.rotation, expand=True)
@@ -150,8 +152,8 @@ def export_pdf(pages: list[Page], layout: Layout, watermark: Watermark, output: 
         for page in pages:
             if cancelled():
                 raise ExportCancelled("已取消导出，原文件未改动。")
-            if page.is_pdf and page.path not in readers:
-                indices = [p.frame for p in pages if p.path == page.path]
+            if page.is_pdf and not has_text_output(page) and page.path not in readers:
+                indices = [p.frame for p in pages if p.path == page.path and not has_text_output(p)]
                 reader = reader_for_export(page.path, indices, cancelled)
                 resources.callback(reader.close)
                 readers[page.path] = reader
@@ -167,7 +169,16 @@ def export_pdf(pages: list[Page], layout: Layout, watermark: Watermark, output: 
             if cancelled():
                 raise ExportCancelled("已取消导出，原文件未改动。")
             destination = writer.add_page(overlay.pages[index - 1])
-            if page.is_pdf:
+            if has_text_output(page):
+                from dataclasses import replace
+                edited = PdfReader(BytesIO(edited_source_pdf(page)))
+                try:
+                    pw, ph, rect = geometry(page, layout)
+                    # The edited intermediate is normalized to the source's visible page.
+                    merge_native(destination, edited.pages[0], replace(page, frame=0), rect, ph)
+                finally:
+                    edited.close()
+            elif page.is_pdf:
                 pw, ph, rect = geometry(page, layout)
                 merge_native(destination, readers[page.path].pages[page.frame], page, rect, ph)
             progress(index, len(pages))

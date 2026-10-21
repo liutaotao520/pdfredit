@@ -13,6 +13,10 @@
 | pypdf | 6.21.0 | BSD-3-Clause；[上游许可](https://github.com/py-pdf/pypdf/blob/main/LICENSE) |
 | pypdfium2 | 5.14.0 | BSD-3-Clause / Apache-2.0 及依赖许可；[上游](https://github.com/pypdfium2-team/pypdfium2) |
 | PDFium | 156.0.8076.0（当前 Windows wheel） | BSD 风格及 Chromium 第三方组件；wheel 的 `licenses/data/windows_x64/BUILD_LICENSES` 提供通知 |
+| RapidOCR | 3.10.0 | Apache-2.0；[上游](https://github.com/RapidAI/RapidOCR)，本地使用 wheel 附带的 PP-OCRv6 det / rec 与方向分类 ONNX 模型 |
+| ONNX Runtime | 1.31.0 | MIT；[上游](https://github.com/microsoft/onnxruntime)，CPU 推理，关闭遥测 |
+| fontTools | 4.67.0 | MIT；[上游](https://github.com/fonttools/fonttools)，读取字体元数据及嵌入限制 |
+| OpenCV / NumPy / Shapely / pyclipper | 见 requirements-lock.txt | OCR 的图像与数值依赖；完整安装许可随本地构建复制到 licenses |
 | charset-normalizer | 3.5.2 | MIT；[上游](https://github.com/jawah/charset_normalizer) |
 | CPython | 3.12 | Python Software Foundation License；[完整许可](https://docs.python.org/3/license.html) |
 
@@ -33,6 +37,7 @@ PDFium 的许可证文件保存在多层子目录，有些文件名没有 `LICEN
 - PyInstaller：GPL-2.0-or-later，带允许打包非 GPL 应用的 bootloader 例外，见[官方许可说明](https://pyinstaller.org/en/stable/license.html)。
 - pytest：MIT；仅开发时使用。
 - Inno Setup：[上游许可证](https://github.com/jrsoftware/issrc/blob/main/license.txt)。`packaging/ChineseSimplified.isl` 来自官方仓库，保留原始翻译归属，来源与校验值记录在 `packaging/language-source.json`，完整许可保存在 `packaging/INNO-LICENSE.txt`。
-- 依赖库、Windows 字体和安装工具不是本项目自有作品。没有将 Windows 字体文件纳入仓库。
+- 依赖库、Windows 字体和安装工具不是本项目自有作品。没有将 Windows 字体文件纳入仓库。文字编辑时读取用户已安装或自行提供的字体，仅将需要的字形嵌入用户导出的 PDF。
+- OCR 模型由锁定版本的 RapidOCR wheel 提供；源码仓库不提交模型二进制。构建时将模型与配置一并打包，不在用户首次使用时在线下载。
 
 构建工具复制依赖包提供的许可文件，不等于完成全部二进制分发要求。当前公开交付范围为源码，预编译安装包不在本次 GitHub 发布范围内。

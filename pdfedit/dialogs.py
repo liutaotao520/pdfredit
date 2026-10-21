@@ -262,23 +262,24 @@ def choose_export(parent, folder, count, layout, watermark):
 class ExportProgressDialog(AppDialog):
     canceled = Signal()
 
-    def __init__(self, parent, count):
-        super().__init__(parent, "正在导出 PDF", 480)
+    def __init__(self, parent, count, recognizing=False):
+        self.recognizing = recognizing
+        super().__init__(parent, "正在识别文字" if recognizing else "正在导出 PDF", 480)
         self.count = count
         self.cancel_requested = False
         self.completed = False
-        self.description = text_label(f"正在排版并合并 {count} 页，请稍候。")
+        self.description = text_label(f"正在本机识别 {count} 页，首次识别扫描件需加载模型。" if recognizing else f"正在排版并合并 {count} 页，请稍候。")
         self.body.addWidget(self.description)
         self.progress = QProgressBar()
         self.progress.setObjectName("dialogProgress")
         self.progress.setRange(0, count)
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
-        self.progress.setAccessibleName("PDF 导出进度")
+        self.progress.setAccessibleName("文字识别进度" if recognizing else "PDF 导出进度")
         self.body.addWidget(self.progress)
         self.counter = text_label(f"已处理 0 / {count} 页", "helper")
         self.body.addWidget(self.counter)
-        self.cancel_button = action_button("取消导出", self.reject)
+        self.cancel_button = action_button("取消识别" if recognizing else "取消导出", self.reject)
         self.actions.addWidget(self.cancel_button)
         self.cancel_button.setFocus()
 
@@ -287,14 +288,14 @@ class ExportProgressDialog(AppDialog):
         if not self.cancel_requested:
             self.counter.setText(f"已处理 {value} / {self.count} 页")
             if value == self.count:
-                self.description.setText("正在完成保存，请稍候。")
+                self.description.setText("正在整理识别结果，请稍候。" if self.recognizing else "正在完成保存，请稍候。")
 
     def reject(self):
         if self.completed or self.cancel_requested:
             return
         self.cancel_requested = True
-        self.description.setText("正在取消导出…")
-        self.counter.setText("正在结束当前操作，请稍候。")
+        self.description.setText("正在取消识别…" if self.recognizing else "正在取消导出…")
+        self.counter.setText("当前页处理结束后停止，保留已完成页面。" if self.recognizing else "正在结束当前操作，请稍候。")
         self.cancel_button.setText("正在取消…")
         self.cancel_button.setEnabled(False)
         self.close_button.setEnabled(False)

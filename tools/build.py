@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--task", required=True)
-    parser.add_argument("--name", default="PDFedit-1.3.4")
+    parser.add_argument("--name", default="PDFedit-1.4.2")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", args.task):
         parser.error("Invalid task name")
@@ -46,6 +46,8 @@ def main():
         "--specpath", str(temp), "--icon", str(icon), "--add-data", str(assets) + ";assets",
         "--collect-all", "pillow_heif", "--hidden-import", "PIL.AvifImagePlugin",
         "--exclude-module", "pytest", "--collect-all", "pypdfium2_raw",
+        "--collect-all", "rapidocr", "--collect-all", "onnxruntime",
+        "--hidden-import", "fontTools.ttLib",
         str(ROOT / "main.py")]
     # Only search this project's runtime and Windows for DLL dependencies.
     # Developer tools on PATH can carry unrelated ICU/OpenSSL DLLs with the same
@@ -58,7 +60,9 @@ def main():
     license_dir = output / "licenses"
     license_dir.mkdir(exist_ok=True)
     dependencies = []
-    for name in ["PySide6-Essentials", "shiboken6", "Pillow", "pillow-heif", "reportlab", "charset-normalizer", "pypdf", "pypdfium2"]:
+    for name in ["PySide6-Essentials", "shiboken6", "Pillow", "pillow-heif", "reportlab", "charset-normalizer", "pypdf", "pypdfium2",
+                 "rapidocr", "onnxruntime", "fonttools", "numpy", "opencv-python-headless", "pyclipper", "shapely", "pyyaml",
+                 "six", "tqdm", "omegaconf", "requests", "colorlog", "flatbuffers", "protobuf", "idna", "urllib3", "certifi"]:
         dist = importlib.metadata.distribution(name)
         dependencies.append({"name": name, "version": dist.version, "license": str(dist.metadata.get("License-Expression") or dist.metadata.get("License") or "See license files")})
         for file in dist.files or []:
@@ -75,6 +79,9 @@ def main():
     for name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
         if (ROOT / name).is_file():
             (output / name).write_bytes((ROOT / name).read_bytes())
+    (output / "docs").mkdir(exist_ok=True)
+    (output / "docs/USER_GUIDE.md").write_bytes((ROOT / "docs/USER_GUIDE.md").read_bytes())
+    (output / "使用说明.txt").write_bytes((ROOT / "packaging/使用说明.txt").read_bytes())
     python_license = Path(sys.base_prefix) / "LICENSE.txt"
     if python_license.is_file():
         (license_dir / "Python-LICENSE.txt").write_bytes(python_license.read_bytes())
