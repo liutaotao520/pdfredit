@@ -32,7 +32,7 @@ PDFium 的许可证文件保存在多层子目录，有些文件名没有 `LICEN
 
 - PyInstaller：GPL-2.0-or-later，带允许打包非 GPL 应用的 bootloader 例外，见[官方许可说明](https://pyinstaller.org/en/stable/license.html)。
 - pytest：MIT；仅开发时使用。
-- Inno Setup：[上游许可证](https://github.com/jrsoftware/issrc/blob/main/license.txt)。`packaging/ChineseSimplified.isl` 来自官方仓库，保留原始翻译归属，来源与校验值记录在 `packaging/language-source.json`。
+- Inno Setup：[上游许可证](https://github.com/jrsoftware/issrc/blob/main/license.txt)。`packaging/ChineseSimplified.isl` 来自官方仓库，保留原始翻译归属，来源与校验值记录在 `packaging/language-source.json`，完整许可保存在 `packaging/INNO-LICENSE.txt`。
 - 依赖库、Windows 字体和安装工具不是本项目自有作品。没有将 Windows 字体文件纳入仓库。
 
 构建工具复制依赖包提供的许可文件，不等于完成全部二进制分发要求。当前公开交付范围为源码，预编译安装包不在本次 GitHub 发布范围内。
