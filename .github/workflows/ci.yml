@@ -20,7 +20,8 @@ jobs:
           python-version: '3.12'
           architecture: x64
       - name: Install locked dependencies
-        run: python -s -m pip install --only-binary=:all: -r requirements-lock.txt
+        run: |
+          python -s -m pip install --only-binary=:all: -r requirements-lock.txt
       - name: Exercise application and export behavior
         run: python -B -s tools/run_tests.py --task ci
       - name: Save test report
