@@ -1,0 +1,33 @@
+name: Windows tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - name: Install locked dependencies
+        run: python -s -m pip install --only-binary=:all: -r requirements-lock.txt
+      - name: Exercise application and export behavior
+        run: python -B -s tools/run_tests.py --task ci
+      - name: Save test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-report
+          path: reports/tests.xml
+          if-no-files-found: ignore
+          retention-days: 14

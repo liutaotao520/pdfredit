@@ -1,0 +1,22 @@
+.venv/
+venv/
+.task_tmp/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.spec
+dist/
+build/
+releases/
+runtime/
+outputs/
+reports/
+.env
+.env.*
+*.ipdf.json
+# Maintainer workstation policy is not part of this application.
+AGENTS.md
+AGENTS.override.md
+project-policy.json
+.vscode/
+.idea/
